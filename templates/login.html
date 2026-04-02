@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProfitIQ — Sign In</title>
+  <link rel="stylesheet" href="/static/css/login.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="logo-mark">PQ</div>
+      <h1>ProfitIQ</h1>
+      <p>E-commerce Profit Intelligence</p>
+    </div>
+
+    <div class="login-card">
+      <div class="tab-row">
+        <button class="tab-btn active" onclick="switchTab('login')">Sign in</button>
+        <button class="tab-btn" onclick="switchTab('signup')">Create account</button>
+      </div>
+
+      <div id="error-msg" class="error-msg"></div>
+
+      <!-- Login form -->
+      <div id="login-form">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="login-user" placeholder="Enter username" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="login-pass" placeholder="Enter password" autocomplete="current-password">
+        </div>
+        <button class="submit-btn" id="login-btn" onclick="doLogin()">Sign in</button>
+      </div>
+
+      <!-- Signup form -->
+      <div id="signup-form" style="display:none">
+        <div class="field">
+          <label>Username</label>
+          <input type="text" id="signup-user" placeholder="Choose a username" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="signup-pass" placeholder="Choose a password" autocomplete="new-password">
+        </div>
+        <button class="submit-btn" id="signup-btn" onclick="doSignup()">Create account</button>
+      </div>
+    </div>
+
+    <div class="seed-hint">
+      After signing in, click <strong>Load sample data</strong> on the dashboard to see it in action.
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach((b,i) =>
+        b.classList.toggle('active', (tab==='login') ? i===0 : i===1));
+      document.getElementById('login-form').style.display  = tab==='login'  ? '' : 'none';
+      document.getElementById('signup-form').style.display = tab==='signup' ? '' : 'none';
+      document.getElementById('error-msg').style.display = 'none';
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('error-msg');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    async function doLogin() {
+      const btn = document.getElementById('login-btn');
+      btn.disabled = true; btn.textContent = 'Signing in…';
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          username: document.getElementById('login-user').value.trim(),
+          password: document.getElementById('login-pass').value
+        })
+      });
+      const data = await res.json();
+      if (data.ok) window.location = '/dashboard';
+      else { showError(data.error || 'Login failed'); btn.disabled=false; btn.textContent='Sign in'; }
+    }
+
+    async function doSignup() {
+      const btn = document.getElementById('signup-btn');
+      btn.disabled = true; btn.textContent = 'Creating account…';
+      const res = await fetch('/signup', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          username: document.getElementById('signup-user').value.trim(),
+          password: document.getElementById('signup-pass').value
+        })
+      });
+      const data = await res.json();
+      if (data.ok) { showError(''); switchTab('login'); alert('Account created! Sign in now.'); }
+      else { showError(data.error || 'Signup failed'); btn.disabled=false; btn.textContent='Create account'; }
+    }
+
+    // Allow Enter key
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const active = document.getElementById('login-form').style.display !== 'none';
+        if (active) doLogin(); else doSignup();
+      }
+    });
+  </script>
+</body>
+</html>

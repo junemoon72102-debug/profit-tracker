@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — ProfitIQ</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+{% from 'sidebar.html' import sidebar %}
+<div class="app-shell">
+  {{ sidebar(username, 'dashboard') }}
+
+  <div class="main">
+    <header class="topbar">
+      <span class="topbar-title">Dashboard</span>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost btn-sm" onclick="seedData()">Load sample data</button>
+      </div>
+    </header>
+
+    <div class="page-body">
+      <div class="page-header">
+        <h1>Profit Overview</h1>
+        <p>All products · real-time calculations</p>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card highlight">
+          <div class="kpi-label">Total Profit</div>
+          <div class="kpi-value" id="kpi-total">—</div>
+          <div class="kpi-sub">across all products</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Products Tracked</div>
+          <div class="kpi-value" id="kpi-count">—</div>
+          <div class="kpi-sub">active SKUs</div>
+        </div>
+        <div class="kpi-card negative">
+          <div class="kpi-label">Loss-Making</div>
+          <div class="kpi-value" id="kpi-loss">—</div>
+          <div class="kpi-sub">need attention</div>
+        </div>
+        <div class="kpi-card positive">
+          <div class="kpi-label">Top Product</div>
+          <div class="kpi-value" id="kpi-top" style="font-size:16px;padding-top:4px">—</div>
+          <div class="kpi-sub" id="kpi-top-profit">best margin</div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-title">Profit per Product</div>
+          <div class="chart-wrap"><canvas id="barChart"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">Profit Distribution</div>
+          <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Recent products table with suggestions -->
+      <div class="table-card">
+        <div class="table-header">
+          <h3>Smart Suggestions</h3>
+          <a href="/products" class="btn btn-ghost btn-sm">Manage products →</a>
+        </div>
+        <div id="suggestions-body">
+          <div class="empty-state">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <h3>No products yet</h3>
+            <p>Add products or load sample data to see suggestions.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+let barChart, pieChart;
+
+function toast(msg, type='') {
+  const t = document.createElement('div');
+  t.className = 'toast' + (type ? ' '+type : '');
+  t.textContent = msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+function fmt(n) {
+  return (n >= 0 ? '+' : '') + '$' + Math.abs(n).toFixed(2);
+}
+
+function suggestion(profit, margin) {
+  if (profit < 0)    return {cls:'stop',   text:'⬛ Stop selling this product'};
+  if (margin < 15)   return {cls:'reduce', text:'⚠ Reduce ad spend or optimize costs'};
+  return               {cls:'scale',  text:'✓ Scale this product'};
+}
+
+async function loadDashboard() {
+  const res  = await fetch('/api/stats');
+  const data = await res.json();
+
+  document.getElementById('kpi-total').textContent = '$' + data.total_profit.toFixed(2);
+  document.getElementById('kpi-total').parentElement.className =
+    'kpi-card highlight' + (data.total_profit < 0 ? ' negative' : '');
+  document.getElementById('kpi-count').textContent = data.total_products;
+  document.getElementById('kpi-loss').textContent  = data.loss_count;
+  document.getElementById('kpi-top').textContent   = data.top_product;
+  document.getElementById('kpi-top-profit').textContent = data.top_profit ? fmt(data.top_profit) : 'best margin';
+
+  // Charts
+  const colors = data.chart_profits.map(v => v >= 0 ? '#16a34a' : '#dc2626');
+  const alphas = data.chart_profits.map(v => v >= 0 ? 'rgba(22,163,74,.12)' : 'rgba(220,38,38,.12)');
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: {
+      labels: data.chart_labels,
+      datasets: [{ data: data.chart_profits, backgroundColor: alphas, borderColor: colors, borderWidth: 2, borderRadius: 6 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { callback: v => '$'+v } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+
+  // Pie — only profitable items
+  const pos = data.chart_labels.map((l,i) => ({l, v: data.chart_profits[i]})).filter(x => x.v > 0);
+  if (pieChart) pieChart.destroy();
+  if (pos.length) {
+    pieChart = new Chart(document.getElementById('pieChart'), {
+      type: 'doughnut',
+      data: {
+        labels: pos.map(x=>x.l),
+        datasets: [{ data: pos.map(x=>x.v), backgroundColor: ['#16a34a','#2563eb','#d97706','#7c3aed','#0891b2'],
+          borderWidth: 0, hoverOffset: 4 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: { legend: { position: 'right', labels: { font: { size: 12 }, boxWidth: 10 } } }
+      }
+    });
+  }
+
+  // Suggestions table
+  await loadSuggestions();
+}
+
+async function loadSuggestions() {
+  const res  = await fetch('/api/products');
+  const products = await res.json();
+  const body = document.getElementById('suggestions-body');
+  if (!products.length) return;
+
+  const rows = products.map(p => {
+    const s = suggestion(p.profit, p.margin);
+    return `<tr>
+      <td>${p.name}</td>
+      <td class="mono">${fmt(p.profit)}</td>
+      <td class="mono">${p.margin.toFixed(1)}%</td>
+      <td><span class="suggestion ${s.cls}">${s.text}</span></td>
+    </tr>`;
+  }).join('');
+
+  body.innerHTML = `<table>
+    <thead><tr>
+      <th>Product</th><th>Profit / unit</th><th>Margin</th><th>Suggestion</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+async function seedData() {
+  await fetch('/api/seed');
+  toast('Sample data loaded!');
+  loadDashboard();
+}
+
+loadDashboard();
+</script>
+</body>
+</html>

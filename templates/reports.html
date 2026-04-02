@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports — ProfitIQ</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+{% from 'sidebar.html' import sidebar %}
+<div class="app-shell">
+  {{ sidebar(username, 'reports') }}
+
+  <div class="main">
+    <header class="topbar">
+      <span class="topbar-title">Reports</span>
+      <div class="topbar-actions">
+        <a href="/api/export" class="btn btn-ghost btn-sm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export CSV
+        </a>
+      </div>
+    </header>
+
+    <div class="page-body">
+      <div class="page-header">
+        <h1>Full Profit Report</h1>
+        <p>Detailed breakdown of all products and metrics.</p>
+      </div>
+
+      <!-- Summary cards -->
+      <div class="kpi-grid" id="report-kpis" style="grid-template-columns: repeat(3, 1fr)">
+        <div class="kpi-card">
+          <div class="kpi-label">Total Revenue Potential</div>
+          <div class="kpi-value" id="r-revenue">—</div>
+          <div class="kpi-sub">sum of selling prices</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Total Cost Outlay</div>
+          <div class="kpi-value negative" id="r-cost">—</div>
+          <div class="kpi-sub">all costs combined</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Average Margin</div>
+          <div class="kpi-value" id="r-avg-margin">—</div>
+          <div class="kpi-sub">across profitable items</div>
+        </div>
+      </div>
+
+      <!-- Full table -->
+      <div class="table-card">
+        <div class="table-header">
+          <h3>Product-Level Detail</h3>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="search-input" placeholder="Search products…"
+              style="padding:6px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);font-family:inherit;font-size:13px"
+              oninput="filterTable()">
+          </div>
+        </div>
+        <div id="report-table">
+          <div class="empty-state">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <h3>No data yet</h3><p>Add products to generate a report.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let allProducts = [];
+
+function fmt(n) {
+  return (n >= 0 ? '' : '-') + '$' + Math.abs(n).toFixed(2);
+}
+
+function suggestion(profit, margin) {
+  if (profit < 0)  return {cls:'stop',  text:'Stop selling'};
+  if (margin < 15) return {cls:'reduce',text:'Optimize costs'};
+  return             {cls:'scale', text:'Scale it'};
+}
+
+async function loadReport() {
+  const res = await fetch('/api/products');
+  allProducts = await res.json();
+  renderSummary();
+  renderTable(allProducts);
+}
+
+function renderSummary() {
+  if (!allProducts.length) return;
+  const revenue    = allProducts.reduce((s,p) => s + p.selling_price, 0);
+  const totalCost  = allProducts.reduce((s,p) => s + (p.cost_price + p.ad_spend + p.platform_fees + p.delivery_cost), 0);
+  const profitables = allProducts.filter(p => p.profit >= 0);
+  const avgMargin  = profitables.length ? profitables.reduce((s,p)=>s+p.margin,0)/profitables.length : 0;
+
+  document.getElementById('r-revenue').textContent    = '$' + revenue.toFixed(2);
+  document.getElementById('r-cost').textContent       = '$' + totalCost.toFixed(2);
+  document.getElementById('r-avg-margin').textContent = avgMargin.toFixed(1) + '%';
+  document.getElementById('r-avg-margin').className   = 'kpi-value ' + (avgMargin >= 15 ? 'positive' : 'negative');
+}
+
+function renderTable(data) {
+  const el = document.getElementById('report-table');
+  if (!data.length) {
+    el.innerHTML = '<div class="empty-state"><h3>No results</h3><p>Try a different search term.</p></div>';
+    return;
+  }
+
+  const rows = data.map(p => {
+    const s  = suggestion(p.profit, p.margin);
+    const pc = p.profit >= 0 ? 'positive' : 'negative';
+    const returnLoss = (p.selling_price * p.return_rate / 100).toFixed(2);
+    return `<tr>
+      <td><strong>${p.name}</strong></td>
+      <td class="mono">$${p.cost_price.toFixed(2)}</td>
+      <td class="mono">$${p.selling_price.toFixed(2)}</td>
+      <td class="mono">$${p.ad_spend.toFixed(2)}</td>
+      <td class="mono">$${p.platform_fees.toFixed(2)}</td>
+      <td class="mono">$${p.delivery_cost.toFixed(2)}</td>
+      <td class="mono">${p.return_rate.toFixed(1)}%</td>
+      <td class="mono">$${returnLoss}</td>
+      <td class="mono ${pc}" style="font-weight:600">${fmt(p.profit)}</td>
+      <td class="mono ${pc}">${p.margin.toFixed(1)}%</td>
+      <td><span class="suggestion ${s.cls}">${s.text}</span></td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr>
+      <th>Name</th><th>Cost</th><th>Sell</th><th>Ad Spend</th>
+      <th>Fees</th><th>Delivery</th><th>Return %</th><th>Return Loss</th>
+      <th>Profit</th><th>Margin</th><th>Action</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function filterTable() {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  renderTable(allProducts.filter(p => p.name.toLowerCase().includes(q)));
+}
+
+loadReport();
+</script>
+</body>
+</html>

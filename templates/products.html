@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Products — ProfitIQ</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+{% from 'sidebar.html' import sidebar %}
+<div class="app-shell">
+  {{ sidebar(username, 'products') }}
+
+  <div class="main">
+    <header class="topbar">
+      <span class="topbar-title">Products</span>
+      <div class="topbar-actions">
+        <button class="btn btn-primary" onclick="openModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add product
+        </button>
+      </div>
+    </header>
+
+    <div class="page-body">
+      <div class="page-header">
+        <h1>Product Profitability</h1>
+        <p>Track costs, calculate margins, and run what-if scenarios.</p>
+      </div>
+
+      <!-- What-if panel -->
+      <div class="whatif-panel">
+        <div class="whatif-title">What-if Analysis</div>
+        <div class="whatif-sub">Adjust ad spend dynamically and see how it affects profit — no page reload.</div>
+        <div class="whatif-row">
+          <select class="whatif-select" id="wi-product" onchange="wiProductChange()">
+            <option value="">— Select a product —</option>
+          </select>
+          <div class="whatif-slider-wrap">
+            <label>Ad Spend: $<span id="wi-val">0</span></label>
+            <input type="range" id="wi-slider" min="0" max="100" step="0.5" value="0" oninput="wiUpdate()">
+          </div>
+          <div class="whatif-result">
+            <div class="whatif-stat">
+              <div class="whatif-stat-label">New Profit</div>
+              <div class="whatif-stat-value" id="wi-profit">—</div>
+            </div>
+            <div class="whatif-stat">
+              <div class="whatif-stat-label">New Margin</div>
+              <div class="whatif-stat-value" id="wi-margin">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Products table -->
+      <div class="table-card">
+        <div class="table-header">
+          <h3 id="product-count">All Products</h3>
+        </div>
+        <div id="product-table">
+          <div class="empty-state">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            </svg>
+            <h3>No products yet</h3>
+            <p>Click "Add product" to get started.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-title" id="modal-title">Add product</div>
+    <input type="hidden" id="edit-id">
+    <div class="field field-full" style="margin-bottom:14px">
+      <label>Product name</label>
+      <input type="text" id="f-name" placeholder="e.g. Wireless Earbuds">
+    </div>
+    <div class="field-grid">
+      <div class="field"><label>Cost price ($)</label><input type="number" id="f-cost" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="field"><label>Selling price ($)</label><input type="number" id="f-sell" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="field"><label>Ad spend / CPA ($)</label><input type="number" id="f-ad" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="field"><label>Platform fees ($)</label><input type="number" id="f-fees" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="field"><label>Delivery cost ($)</label><input type="number" id="f-delivery" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="field"><label>Return rate (%)</label><input type="number" id="f-return" step="0.1" min="0" max="100" placeholder="0"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProduct()">Save product</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+let products = [];
+let wiTimer = null;
+
+function toast(msg, type='') {
+  const t = document.createElement('div');
+  t.className = 'toast' + (type ? ' '+type : '');
+  t.textContent = msg;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+function fmt(n) {
+  return (n >= 0 ? '+' : '-') + '$' + Math.abs(n).toFixed(2);
+}
+
+function suggestion(profit, margin) {
+  if (profit < 0)   return {cls:'badge-red',   text:'Loss'};
+  if (margin < 15)  return {cls:'badge-amber', text:'Low margin'};
+  return              {cls:'badge-green', text:'Healthy'};
+}
+
+async function loadProducts() {
+  const res = await fetch('/api/products');
+  products  = await res.json();
+  renderTable();
+  populateWiSelect();
+}
+
+function renderTable() {
+  const el = document.getElementById('product-table');
+  document.getElementById('product-count').textContent =
+    products.length + ' Product' + (products.length !== 1 ? 's' : '');
+
+  if (!products.length) {
+    el.innerHTML = `<div class="empty-state">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+      </svg>
+      <h3>No products yet</h3><p>Click "Add product" to get started.</p></div>`;
+    return;
+  }
+
+  const rows = products.map(p => {
+    const s = suggestion(p.profit, p.margin);
+    const pc = p.profit >= 0 ? 'positive' : 'negative';
+    return `<tr>
+      <td><strong>${p.name}</strong></td>
+      <td class="mono">$${p.cost_price.toFixed(2)}</td>
+      <td class="mono">$${p.selling_price.toFixed(2)}</td>
+      <td class="mono">$${p.ad_spend.toFixed(2)}</td>
+      <td class="mono ${pc}">${fmt(p.profit)}</td>
+      <td class="mono ${pc}">${p.margin.toFixed(1)}%</td>
+      <td><span class="badge ${s.cls}">${s.text}</span></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="editProduct(${p.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id})">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th>Name</th><th>Cost</th><th>Sell</th><th>Ad Spend</th>
+      <th>Profit</th><th>Margin</th><th>Status</th><th>Actions</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function openModal(reset=true) {
+  if (reset) {
+    document.getElementById('modal-title').textContent = 'Add product';
+    document.getElementById('edit-id').value = '';
+    ['f-name','f-cost','f-sell','f-ad','f-fees','f-delivery','f-return']
+      .forEach(id => document.getElementById(id).value = '');
+  }
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+
+function editProduct(id) {
+  const p = products.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('modal-title').textContent = 'Edit product';
+  document.getElementById('edit-id').value    = p.id;
+  document.getElementById('f-name').value     = p.name;
+  document.getElementById('f-cost').value     = p.cost_price;
+  document.getElementById('f-sell').value     = p.selling_price;
+  document.getElementById('f-ad').value       = p.ad_spend;
+  document.getElementById('f-fees').value     = p.platform_fees;
+  document.getElementById('f-delivery').value = p.delivery_cost;
+  document.getElementById('f-return').value   = p.return_rate;
+  openModal(false);
+}
+
+async function saveProduct() {
+  const id = document.getElementById('edit-id').value;
+  const body = {
+    name:          document.getElementById('f-name').value.trim(),
+    cost_price:    +document.getElementById('f-cost').value,
+    selling_price: +document.getElementById('f-sell').value,
+    ad_spend:      +document.getElementById('f-ad').value,
+    platform_fees: +document.getElementById('f-fees').value,
+    delivery_cost: +document.getElementById('f-delivery').value,
+    return_rate:   +document.getElementById('f-return').value,
+  };
+  if (!body.name) { toast('Product name is required', 'error'); return; }
+
+  const url    = id ? `/api/products/${id}` : '/api/products';
+  const method = id ? 'PUT' : 'POST';
+  await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  closeModal();
+  toast(id ? 'Product updated!' : 'Product added!');
+  loadProducts();
+}
+
+async function deleteProduct(id) {
+  if (!confirm('Delete this product?')) return;
+  await fetch(`/api/products/${id}`, { method: 'DELETE' });
+  toast('Product deleted');
+  loadProducts();
+}
+
+// ── What-if ─────────────────────────────────────────────
+function populateWiSelect() {
+  const sel = document.getElementById('wi-product');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Select a product —</option>' +
+    products.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  if (cur) sel.value = cur;
+}
+
+function wiProductChange() {
+  const id = +document.getElementById('wi-product').value;
+  const p  = products.find(x => x.id === id);
+  if (p) {
+    document.getElementById('wi-slider').value = p.ad_spend;
+    document.getElementById('wi-val').textContent = p.ad_spend.toFixed(2);
+    wiQuery(id, p.ad_spend);
+  } else {
+    document.getElementById('wi-profit').textContent = '—';
+    document.getElementById('wi-margin').textContent = '—';
+  }
+}
+
+function wiUpdate() {
+  const val = +document.getElementById('wi-slider').value;
+  document.getElementById('wi-val').textContent = val.toFixed(2);
+  const id = +document.getElementById('wi-product').value;
+  if (!id) return;
+  clearTimeout(wiTimer);
+  wiTimer = setTimeout(() => wiQuery(id, val), 80);
+}
+
+async function wiQuery(id, ad_spend) {
+  const res  = await fetch(`/api/whatif/${id}`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ ad_spend })
+  });
+  const data = await res.json();
+  const pp = document.getElementById('wi-profit');
+  const pm = document.getElementById('wi-margin');
+  pp.textContent = fmt(data.profit);
+  pm.textContent = data.margin.toFixed(1) + '%';
+  pp.className = 'whatif-stat-value ' + (data.profit >= 0 ? 'positive' : 'negative');
+  pm.className = 'whatif-stat-value ' + (data.margin >= 0 ? 'positive' : 'negative');
+}
+
+// Click outside modal to close
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal')) closeModal();
+});
+
+loadProducts();
+</script>
+</body>
+</html>
